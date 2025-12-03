@@ -5,6 +5,10 @@ import fsp from "fs/promises";
 import path from "path";
 import os from "os";
 import { v4 as uuidv4 } from "uuid";
+import {
+  mk20CreateStore,
+  mk20UploadFile,
+} from "../api/mk20";
 
 const BASE_TMP_DIR = path.join(os.tmpdir(), "vaultx_uploads");
 
@@ -56,7 +60,7 @@ export async function handleUploadChunk(req: Request, res: Response) {
 }
 
 /**
- * 合并所有分片
+ * 合并所有分片 + 尝试推送到 MK20
  * 对应前端：POST http://localhost:4000/api/storage/upload/complete
  */
 export async function handleUploadComplete(req: Request, res: Response) {
@@ -115,23 +119,70 @@ export async function handleUploadComplete(req: Request, res: Response) {
     writeStream.end();
 
     const stat = await fsp.stat(mergedPath);
-    const uploadId = uuidv4();
+    const localUploadId = uuidv4();
 
     console.log(
       `[upload/complete] merged`,
       fileName,
       "size =",
       stat.size,
-      "bytes, uploadId =",
-      uploadId
+      "bytes, localUploadId =",
+      localUploadId
     );
 
+    // ========= 这里开始：尝试推送到 MK20 =========
+    let finalUploadId = localUploadId;
+    let cid: string | undefined;
+    let mk20Status: string | undefined;
+    let note = "已在本地合并文件";
+
+    try {
+      if (process.env.MK20_BASE_URL) {
+        console.log("[upload/complete] pushing to MK20...");
+        const store = await mk20CreateStore({
+          filename: fileName,
+          sizeBytes: stat.size,
+        });
+
+        finalUploadId = store.storeId || localUploadId;
+
+        const uploadResult = await mk20UploadFile(finalUploadId, mergedPath);
+
+        cid = uploadResult.cid;
+        mk20Status = uploadResult.status ?? "pending";
+        note = "已上传到 MK20，等待后续处理";
+
+        console.log(
+          "[upload/complete] MK20 done storeId =",
+          finalUploadId,
+          "cid =",
+          cid,
+          "status =",
+          mk20Status
+        );
+      } else {
+        console.warn(
+          "[upload/complete] MK20_BASE_URL not set, skip MK20 upload (local only)"
+        );
+        note = "MK20 未配置，目前仅在本地合并文件";
+      }
+    } catch (mkErr: any) {
+      console.error("[upload/complete] MK20 upload failed:", mkErr?.message);
+      note =
+        "MK20 上传失败，仅保留本地合并文件：" +
+        (mkErr?.message || "unknown error");
+    }
+
+    // ========= 最终返回给前端 =========
     return res.json({
       ok: true,
-      uploadId,
+      uploadId: finalUploadId, // 前端仍然用 uploadId 字段，不需要改
       filename: fileName,
       sizeBytes: stat.size,
-      storeID: uploadId, // 先用 uploadId 代替 storeID
+      storeID: finalUploadId, // 兼容以前的字段名
+      cid,
+      status: mk20Status,
+      note,
     });
   } catch (err: any) {
     console.error("[upload/complete] error", err);
@@ -140,3 +191,4 @@ export async function handleUploadComplete(req: Request, res: Response) {
       .json({ ok: false, message: err?.message || "internal error" });
   }
 }
+
