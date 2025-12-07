@@ -1,194 +1,228 @@
 // src/controllers/storage.controller.ts
 import { Request, Response } from "express";
 import fs from "fs";
-import fsp from "fs/promises";
 import path from "path";
-import os from "os";
 import { v4 as uuidv4 } from "uuid";
-import {
-  mk20CreateStore,
-  mk20UploadFile,
-} from "../api/mk20";
+import { UPLOAD_ROOT } from "../services/upload.service";
+import { uploadToMK20 } from "../api/mk20";
 
-const BASE_TMP_DIR = path.join(os.tmpdir(), "vaultx_uploads");
+const DEAL_DB_PATH = path.join(process.cwd(), "deal.json");
 
-async function ensureDir(dir: string) {
-  await fsp.mkdir(dir, { recursive: true });
-}
+type StoredFileRecord = {
+  id: string; // 本地 UploadId
+  filename: string;
+  sizeBytes: number;
+  cid?: string;
+  status: string;
+  note?: string;
+  createdAt: string;
+};
 
-/**
- * 处理单个分片上传
- * 对应前端：POST http://localhost:4000/api/storage/upload/chunk
- */
-export async function handleUploadChunk(req: Request, res: Response) {
+// 简单 JSON “数据库”
+function loadDb(): StoredFileRecord[] {
+  if (!fs.existsSync(DEAL_DB_PATH)) return [];
   try {
-    const file = req.file;
-    const { index, fileName } = req.body as {
-      index: string;
-      fileName: string;
-    };
-
-    if (!file || index === undefined || !fileName) {
-      return res
-        .status(400)
-        .json({ ok: false, message: "missing file / index / fileName" });
-    }
-
-    // 每个原始文件一个子目录
-    const fileDir = path.join(BASE_TMP_DIR, fileName);
-    await ensureDir(fileDir);
-
-    const destPath = path.join(fileDir, `chunk_${index}`);
-    await fsp.rename(file.path, destPath);
-
-    console.log(
-      `[upload/chunk]`,
-      fileName,
-      "chunk",
-      index,
-      "->",
-      destPath
-    );
-
-    return res.json({ ok: true });
-  } catch (err: any) {
-    console.error("[upload/chunk] error", err);
-    return res
-      .status(500)
-      .json({ ok: false, message: err?.message || "internal error" });
+    const raw = fs.readFileSync(DEAL_DB_PATH, "utf-8");
+    const data = JSON.parse(raw);
+    if (Array.isArray(data)) return data;
+    return [];
+  } catch {
+    return [];
   }
 }
 
-/**
- * 合并所有分片 + 尝试推送到 MK20
- * 对应前端：POST http://localhost:4000/api/storage/upload/complete
- */
-export async function handleUploadComplete(req: Request, res: Response) {
+function saveDb(list: StoredFileRecord[]) {
+  fs.writeFileSync(DEAL_DB_PATH, JSON.stringify(list, null, 2), "utf-8");
+}
+
+// ========== 1. 接收分片 ==========
+
+export function uploadChunk(req: Request, res: Response) {
+  const file = req.file;
+  const { index, fileName } = req.body;
+
+  if (!file || !fileName) {
+    return res.status(400).json({ ok: false, message: "缺少文件或文件名" });
+  }
+
+  console.log(`[upload/chunk] ${fileName} chunk ${index} -> ${file.path}`);
+  res.json({ ok: true });
+}
+
+// ========== 2. 合并分片并（可选）上传 MK20 ==========
+
+export async function mergeChunksAndUpload(req: Request, res: Response) {
+  const { fileName, totalChunks } = req.body as {
+    fileName?: string;
+    totalChunks?: number;
+  };
+
+  console.log("[upload/complete] raw body =", req.body);
+
+  if (!fileName || typeof totalChunks === "undefined") {
+    return res
+      .status(400)
+      .json({ ok: false, message: "缺少 fileName 或 totalChunks" });
+  }
+
+  const chunksDir = path.join(UPLOAD_ROOT, fileName);
+  if (!fs.existsSync(chunksDir)) {
+    return res
+      .status(400)
+      .json({ ok: false, message: "找不到对应的分片目录" });
+  }
+
+  const mergedPath = path.join(chunksDir, `${fileName}.merged`);
+
+  console.log(
+    `[upload/complete] start merge ${fileName} chunks = ${totalChunks}`
+  );
+
+  const writeStream = fs.createWriteStream(mergedPath);
+
   try {
-    const { fileName, totalChunks } = req.body as {
-      fileName: string;
-      totalChunks: string | number;
-    };
-
-    if (!fileName || totalChunks === undefined) {
-      return res
-        .status(400)
-        .json({ ok: false, message: "missing fileName / totalChunks" });
-    }
-
-    const chunksCount = Number(totalChunks);
-    const fileDir = path.join(BASE_TMP_DIR, fileName);
-    const mergedPath = path.join(fileDir, `${fileName}.merged`);
-
-    await ensureDir(fileDir);
-
-    console.log(
-      `[upload/complete] start merge`,
-      fileName,
-      "chunks =",
-      chunksCount
-    );
-
-    const writeStream = fs.createWriteStream(mergedPath);
-
-    for (let i = 0; i < chunksCount; i++) {
-      const chunkPath = path.join(fileDir, `chunk_${i}`);
-
-      // 检查分片是否存在
-      const exists = await fsp
-        .access(chunkPath)
-        .then(() => true)
-        .catch(() => false);
-
-      if (!exists) {
-        writeStream.close();
-        console.error("[upload/complete] missing chunk", i, chunkPath);
-        return res
-          .status(400)
-          .json({ ok: false, message: `missing chunk ${i}` });
+    for (let i = 0; i < Number(totalChunks); i++) {
+      const chunkPath = path.join(chunksDir, `chunk_${i}`);
+      if (!fs.existsSync(chunkPath)) {
+        throw new Error(`缺少分片文件: chunk_${i}`);
       }
-
-      await new Promise<void>((resolve, reject) => {
-        const rs = fs.createReadStream(chunkPath);
-        rs.on("error", reject);
-        rs.on("end", resolve);
-        rs.pipe(writeStream, { end: false });
-      });
+      const data = fs.readFileSync(chunkPath);
+      writeStream.write(data);
     }
-
+  } catch (err: any) {
+    writeStream.close();
+    console.error("[upload/complete] merge error", err);
+    return res.status(500).json({
+      ok: false,
+      message: "合并分片失败",
+      error: err?.message || String(err),
+    });
+  } finally {
     writeStream.end();
+  }
 
-    const stat = await fsp.stat(mergedPath);
-    const localUploadId = uuidv4();
+  const stat = fs.statSync(mergedPath);
+  const sizeBytes = stat.size;
+  const uploadId = uuidv4();
 
-    console.log(
-      `[upload/complete] merged`,
-      fileName,
-      "size =",
-      stat.size,
-      "bytes, localUploadId =",
-      localUploadId
+  console.log(
+    `[upload/complete] merged ${fileName}, size = ${sizeBytes} bytes, localUploadId = ${uploadId}`
+  );
+
+  const record: StoredFileRecord = {
+    id: uploadId,
+    filename: fileName,
+    sizeBytes,
+    status: "pending",
+    note: "本地合并完成，等待上传 MK20",
+    createdAt: new Date().toISOString(),
+  };
+
+  let db = loadDb();
+  db.push(record);
+
+  // ===== 可选：真实推 MK20（现在你那边域名还没通，失败也没关系）=====
+  try {
+    console.log("[upload/complete] pushing to MK20...");
+    const mk20Result = await uploadToMK20(mergedPath, { filename: fileName });
+
+    record.status = "mk20_uploaded";
+    if (mk20Result.cid) record.cid = mk20Result.cid;
+    record.note =
+      mk20Result.note ||
+      "已推送到 MK20（具体结果请在 MK20 控制台或 Curio/MK20 控制台查看）";
+  } catch (err: any) {
+    console.warn(
+      "[upload/complete] MK20 upload failed:",
+      err?.message || err
     );
+    record.status = "mk20_failed";
+    record.note = `MK20 上传失败：${err?.message || String(err)}`;
+  }
 
-    // ========= 这里开始：尝试推送到 MK20 =========
-    let finalUploadId = localUploadId;
-    let cid: string | undefined;
-    let mk20Status: string | undefined;
-    let note = "已在本地合并文件";
+  db = db.map((x) => (x.id === record.id ? record : x));
+  saveDb(db);
 
-    try {
-      if (process.env.MK20_BASE_URL) {
-        console.log("[upload/complete] pushing to MK20...");
-        const store = await mk20CreateStore({
-          filename: fileName,
-          sizeBytes: stat.size,
-        });
+  return res.json({
+    ok: true,
+    uploadId,
+    filename: fileName,
+    sizeBytes,
+    cid: record.cid || null,
+    status: record.status,
+    note: record.note,
+  });
+}
 
-        finalUploadId = store.storeId || localUploadId;
+// ========== 3. 列出文件记录 ==========
 
-        const uploadResult = await mk20UploadFile(finalUploadId, mergedPath);
+export function listFiles(req: Request, res: Response) {
+  const db = loadDb();
+  return res.json({
+    ok: true,
+    files: db,
+  });
+}
 
-        cid = uploadResult.cid;
-        mk20Status = uploadResult.status ?? "pending";
-        note = "已上传到 MK20，等待后续处理";
+// ========== 4. 删除文件记录 ==========
 
-        console.log(
-          "[upload/complete] MK20 done storeId =",
-          finalUploadId,
-          "cid =",
-          cid,
-          "status =",
-          mk20Status
-        );
-      } else {
-        console.warn(
-          "[upload/complete] MK20_BASE_URL not set, skip MK20 upload (local only)"
-        );
-        note = "MK20 未配置，目前仅在本地合并文件";
-      }
-    } catch (mkErr: any) {
-      console.error("[upload/complete] MK20 upload failed:", mkErr?.message);
-      note =
-        "MK20 上传失败，仅保留本地合并文件：" +
-        (mkErr?.message || "unknown error");
-    }
+export function deleteFile(req: Request, res: Response) {
+  const { id } = req.params;
+  if (!id) {
+    return res.status(400).json({ ok: false, message: "缺少 id" });
+  }
 
-    // ========= 最终返回给前端 =========
+  const db = loadDb();
+  const item = db.find((x) => x.id === id);
+  if (!item) {
+    return res.status(404).json({ ok: false, message: "未找到对应记录" });
+  }
+
+  const newDb = db.filter((x) => x.id !== id);
+  saveDb(newDb);
+
+  return res.json({ ok: true });
+}
+
+// ========== 5. Demo：创建本地 Deal 记录 ==========
+
+export function createDemoDeal(req: Request, res: Response) {
+  const { uploadId } = req.params;
+  const { durationDays, replicas, minerIds } = req.body || {};
+
+  console.log("[deal] incoming =", {
+    uploadId,
+    durationDays,
+    replicas,
+    minerIds,
+  });
+
+  const db = loadDb();
+  const idx = db.findIndex((r) => r.id === uploadId);
+
+  const dealId = `demo-deal-${Date.now()}`;
+
+  if (idx >= 0) {
+    db[idx].status = "deal_created";
+    db[idx].note = `Demo：本地创建存储 Deal 记录（duration=${durationDays}, replicas=${replicas}）`;
+    saveDb(db);
+
     return res.json({
       ok: true,
-      uploadId: finalUploadId, // 前端仍然用 uploadId 字段，不需要改
-      filename: fileName,
-      sizeBytes: stat.size,
-      storeID: finalUploadId, // 兼容以前的字段名
-      cid,
-      status: mk20Status,
-      note,
+      uploadId,
+      dealId,
+      cid: db[idx].cid || null,
+      status: db[idx].status,
+      note: db[idx].note,
     });
-  } catch (err: any) {
-    console.error("[upload/complete] error", err);
-    return res
-      .status(500)
-      .json({ ok: false, message: err?.message || "internal error" });
   }
-}
 
+  // 即使没找到记录，也返回 200，避免前端报错 —— 只是标记一下
+  return res.json({
+    ok: true,
+    uploadId,
+    dealId,
+    status: "deal_created",
+    note: "Demo：未在本地找到 upload 记录，但仍假定 Deal 创建成功",
+  });
+}

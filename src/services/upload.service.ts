@@ -1,34 +1,35 @@
 // src/services/upload.service.ts
+import multer from "multer";
+import fs from "fs";
+import path from "path";
+import os from "os";
 
-export type UploadStatus = "stored" | "failed";
+// 上传根目录：系统临时目录下的 vaultx_uploads
+export const UPLOAD_ROOT = path.join(os.tmpdir(), "vaultx_uploads");
 
-export interface UploadRecord {
-  uploadId: string;
-  filename: string;
-  storedFilename: string;
-  sizeBytes: number;
-  mimeType: string;
-  sha256: string;
-  storedPath: string;
-  status: UploadStatus;
-  note?: string;
-  createdAt: string; // ISO 时间
+// 确保目录存在
+if (!fs.existsSync(UPLOAD_ROOT)) {
+  fs.mkdirSync(UPLOAD_ROOT, { recursive: true });
 }
 
-// 简单内存数据库：进程重启后会丢失，够我们开发和调试用
-const uploads: UploadRecord[] = [];
+// 使用 diskStorage，根据 fileName 建子目录，根据 index 命名分片
+const storage = multer.diskStorage({
+  destination(req, file, cb) {
+    // 前端在 formData 里传了 fileName
+    const rawName = (req.body?.fileName as string) || "blob";
+    // 防止文件名里有 / 或 \
+    const safeName = rawName.replace(/[\/\\]/g, "_");
 
-export function addUpload(record: UploadRecord) {
-  uploads.push(record);
-}
+    const dir = path.join(UPLOAD_ROOT, safeName);
+    fs.mkdirSync(dir, { recursive: true });
 
-export function listUploads(): UploadRecord[] {
-  // 可以根据时间倒序返回，方便查看
-  return [...uploads].sort(
-    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-  );
-}
+    cb(null, dir);
+  },
+  filename(req, file, cb) {
+    const index = (req.body?.index as string) ?? "0";
+    cb(null, `chunk_${index}`);
+  },
+});
 
-export function getUploadById(uploadId: string): UploadRecord | undefined {
-  return uploads.find((u) => u.uploadId === uploadId);
-}
+// 导出给路由用
+export const uploadMiddleware = multer({ storage });
