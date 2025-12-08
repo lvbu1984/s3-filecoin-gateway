@@ -1,19 +1,21 @@
 // src/server.ts
-// 后端 · vaultx-api
-import "dotenv/config";
-import app from "./index";
+import express from "express";
+import cors from "cors";
 
-const PORT = process.env.PORT || 4000;
+import dealRoutes from "./routes/deal.routes";
+import uploadRoutes from "./routes/upload.routes";
+import storageRoutes from "./routes/storage.routes";   // ← 新增：文件列表 / 下载 / 删除
 
-// 👇 新增：启动时打印 MK20 配置，方便确认 .env 是否生效
-console.log("[env] PORT =", PORT);
-console.log("[env] MK20_BASE_URL =", process.env.MK20_BASE_URL);
-console.log(
-  "[env] MK20_API_KEY prefix =",
-  process.env.MK20_API_KEY?.slice(0, 6) || "(not set)"
-);
+const app = express();
+app.use(cors());
+app.use(express.json());
 
+// 路由挂载
+app.use("/api/deal", dealRoutes);
+app.use("/api/upload", uploadRoutes);
+app.use("/api/storage", storageRoutes);               // ← 必须加上这一行！！！
+
+const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
-  console.log(`vaultx-api listening on http://localhost:${PORT}`);
+  console.log(`VaultX API listening on port ${PORT}`);
 });
-
