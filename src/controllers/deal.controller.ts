@@ -1,103 +1,78 @@
 // src/controllers/deal.controller.ts
 import { Request, Response } from "express";
-import fs from "fs";
-import path from "path";
+import { getStorageProviderAdapter } from "../adapters";
 
-// 和 storage.controller.ts 里用的是同一个 JSON “数据库”
-const DEAL_DB_PATH = path.join(process.cwd(), "deal.json");
-
-type StoredFileRecord = {
-  id: string;          // 本地 UploadId
-  filename: string;
-  sizeBytes: number;
-  cid?: string;
-  status: string;
-  note?: string;
-  createdAt: string;
-};
-
-function loadDb(): StoredFileRecord[] {
-  if (!fs.existsSync(DEAL_DB_PATH)) return [];
-  try {
-    const raw = fs.readFileSync(DEAL_DB_PATH, "utf-8");
-    const data = JSON.parse(raw);
-    if (Array.isArray(data)) return data;
-    return [];
-  } catch {
-    return [];
-  }
-}
-
-function saveDb(list: StoredFileRecord[]) {
-  fs.writeFileSync(DEAL_DB_PATH, JSON.stringify(list, null, 2), "utf-8");
-}
-
-// POST /api/deal/create
 export async function createDeal(req: Request, res: Response) {
-  const { uploadId, durationDays, replicas, minerIds } = req.body || {};
+  try {
+    const { cid } = req.body || {};
+    if (!cid) return res.status(400).json({ error: "cid required" });
 
-  console.log("[deal/create] body =", req.body);
+    const adapter = getStorageProviderAdapter();
+    const out = await adapter.createDeal({ cid: String(cid) });
 
-  // 只做最基本的校验：必须有 uploadId
-  if (!uploadId) {
-    return res
-      .status(400)
-      .json({ ok: false, message: "缺少 uploadId（前端应该传 uploadId）" });
+    return res.json(out);
+  } catch (e: any) {
+    const code = e?.statusCode ? Number(e.statusCode) : 500;
+    return res.status(code).json({ error: e?.message || "create deal failed" });
   }
+}
 
-  let db = loadDb();
-  const idx = db.findIndex((x) => x.id === uploadId);
+export async function dealStatus(req: Request, res: Response) {
+  try {
+    const dealId = String(req.query.dealId || "");
+    if (!dealId) return res.status(400).json({ error: "dealId required" });
 
-  const dealId = `demo-deal-${String(uploadId).slice(0, 8)}`;
+    const adapter = getStorageProviderAdapter();
+    const out = await adapter.getDealStatus(dealId);
 
-  if (idx >= 0) {
-    // 找到之前 upload 记录，就在上面补充 Deal 信息
-    const rec = db[idx];
-
-    rec.status = "deal_created";
-    rec.note = `Demo Deal 已创建：${dealId}，副本=${replicas ?? "-"}，矿工=${Array.isArray(
-      minerIds
-    )
-      ? minerIds.join(",")
-      : "-"}`;
-
-    db[idx] = rec;
-    saveDb(db);
-
-    return res.json({
-      ok: true,
-      dealId,
-      uploadId,
-      filename: rec.filename,
-      sizeBytes: rec.sizeBytes,
-      cid: rec.cid ?? null,
-      status: rec.status,
-      note: rec.note,
-    });
+    return res.json(out);
+  } catch (e: any) {
+    const code = e?.statusCode ? Number(e.statusCode) : 404;
+    return res.status(code).json({ error: e?.message || "not found" });
   }
+}
 
-  // 没找到 upload 记录，也不要 400，直接创建一条新 Demo 记录
-  const now = new Date().toISOString();
-  const newRec: StoredFileRecord = {
-    id: uploadId,
-    filename: "unknown",
-    sizeBytes: 0,
-    status: "deal_created",
-    note: `Demo Deal ${dealId}（未找到对应的 upload 记录）`,
-    createdAt: now,
-  };
+/**
+ * GET /api/deal/list
+ * 可选 query:
+ *  - q: string（按 dealId 或 cid 模糊匹配，大小写不敏感）
+ *  - limit: number（默认 50，最大 200）
+ *  - offset: number（默认 0）
+ *
+ * 返回结构不变：{ items: [...] }
+ */
+export async function dealList(req: Request, res: Response) {
+  try {
+    const adapter = getStorageProviderAdapter();
+    const out = await adapter.listDeals();
 
-  db.push(newRec);
-  saveDb(db);
+    const rawItems = Array.isArray((out as any)?.items) ? (out as any).items : [];
 
-  return res.json({
-    ok: true,
-    dealId,
-    uploadId,
-    filename: newRec.filename,
-    sizeBytes: newRec.sizeBytes,
-    cid: null,
-    status: newRec.status,
-    note: newRec.note,
-  });
+    const q = String(req.query.q || "").trim().toLowerCase();
+
+    let limit = Number(req.query.limit ?? 50);
+    let offset = Number(req.query.offset ?? 0);
+
+    if (!Number.isFinite(limit) || limit <= 0) limit = 50;
+    if (!Number.isFinite(offset) || offset < 0) offset = 0;
+    if (limit > 200) limit = 200;
+
+    let items = rawItems;
+
+    // ✅ 搜索：dealId / cid 模糊匹配
+    if (q) {
+      items = items.filter((x: any) => {
+        const dealId = String(x?.dealId || "").toLowerCase();
+        const cid = String(x?.cid || "").toLowerCase();
+        return dealId.includes(q) || cid.includes(q);
+      });
+    }
+
+    // ✅ 分页：offset/limit
+    items = items.slice(offset, offset + limit);
+
+    return res.json({ items });
+  } catch (e: any) {
+    return res.status(500).json({ error: e?.message || "list failed" });
+  }
 }

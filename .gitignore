@@ -4,3 +4,8 @@ uploads/
 .env
 *.log
 
+
+# VaultX runtime artifacts (do not commit)
+mock_uploads/
+*.bin
+chunk*.bin

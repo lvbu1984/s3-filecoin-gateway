@@ -1,121 +1,124 @@
 // src/controllers/upload.controller.ts
 import { Request, Response } from "express";
-import {
-  initUpload,
-  saveChunk,
-  assembleChunks,
-} from "../services/upload.service";
-import { createDealOnCC } from "../services/ccClient";
-import { addFileRecord } from "../fileStore";
+import { getStorageProviderAdapter } from "../adapters";
 
-export async function initUploadHandler(req: Request, res: Response) {
+export async function uploadInit(req: Request, res: Response) {
   try {
-    const {
-      fileName,
-      fileSize,
-      mimeType,
-      totalChunks,
-      replicationStrategy,
-      selectedNodes,
-    } = req.body || {};
-
-    if (!fileName || !fileSize || !totalChunks) {
-      return res
-        .status(400)
-        .json({ error: "fileName, fileSize, totalChunks are required" });
+    const { filename, totalSize, chunkSize } = req.body || {};
+    if (!filename || !totalSize || !chunkSize) {
+      return res.status(400).json({ error: "filename,totalSize,chunkSize required" });
     }
 
-    const result = await initUpload({
-      fileName,
-      fileSize,
-      mimeType,
-      totalChunks,
-      replicationStrategy,
-      selectedNodes,
+    const adapter = getStorageProviderAdapter();
+    const out = await adapter.initUpload({
+      filename: String(filename),
+      totalSize: Number(totalSize),
+      chunkSize: Number(chunkSize),
     });
 
-    return res.json(result);
-  } catch (err: any) {
-    console.error("initUploadHandler error:", err);
-    return res.status(500).json({ error: "Failed to init upload" });
+    return res.json(out);
+  } catch (e: any) {
+    return res.status(500).json({ error: e?.message || "upload init failed" });
   }
 }
 
-export async function uploadChunkHandler(req: Request, res: Response) {
+export async function uploadChunk(req: Request, res: Response) {
   try {
-    const { uploadId, index, total } = req.query as any;
+    const uploadId = String((req.body as any)?.uploadId || "");
+    const chunkIndex = Number((req.body as any)?.chunkIndex);
 
-    if (!uploadId || index === undefined) {
-      return res.status(400).json({ error: "uploadId and index are required" });
-    }
-    if (!req.file || !req.file.buffer) {
-      return res.status(400).json({ error: "chunk file is required" });
+    if (!uploadId || Number.isNaN(chunkIndex)) {
+      return res.status(400).json({ error: "uploadId and chunkIndex required" });
     }
 
-    const chunkIndex = parseInt(index, 10);
-    await saveChunk(uploadId, chunkIndex, req.file.buffer);
+    const f = (req as any).file;
+    if (!f?.buffer) return res.status(400).json({ error: "file required" });
 
-    return res.json({
-      ok: true,
+    const adapter = getStorageProviderAdapter();
+    const out = await adapter.uploadChunk({
       uploadId,
-      index: chunkIndex,
-      total: total ? parseInt(total as string, 10) : undefined,
+      chunkIndex,
+      buffer: f.buffer as Buffer,
     });
-  } catch (err: any) {
-    console.error("uploadChunkHandler error:", err);
-    return res.status(500).json({ error: "Failed to upload chunk" });
+
+    return res.json(out);
+  } catch (e: any) {
+    const code = e?.statusCode ? Number(e.statusCode) : 500;
+    return res.status(code).json({ error: e?.message || "upload chunk failed" });
   }
 }
 
-export async function completeUploadHandler(req: Request, res: Response) {
+export async function uploadComplete(req: Request, res: Response) {
   try {
-    const {
-      uploadId,
-      walletAddress,
-      priceFil,
-      priceUsdfc,
-      paymentTxHash,
-    } = req.body || {};
-    if (!uploadId) {
-      return res.status(400).json({ error: "uploadId is required" });
+    const { uploadId } = req.body || {};
+    if (!uploadId) return res.status(400).json({ error: "uploadId required" });
+
+    const adapter = getStorageProviderAdapter();
+    const out = await adapter.completeUpload({ uploadId: String(uploadId) });
+
+    return res.json(out);
+  } catch (e: any) {
+    const code = e?.statusCode ? Number(e.statusCode) : 500;
+    return res.status(code).json({ error: e?.message || "upload complete failed" });
+  }
+}
+
+export async function uploadStatus(req: Request, res: Response) {
+  try {
+    const uploadId = String(req.query.uploadId || "");
+    if (!uploadId) return res.status(400).json({ error: "uploadId required" });
+
+    const adapter = getStorageProviderAdapter();
+    const out = await adapter.getUploadStatus(uploadId);
+
+    return res.json(out);
+  } catch (e: any) {
+    const code = e?.statusCode ? Number(e.statusCode) : 404;
+    return res.status(code).json({ error: e?.message || "not found" });
+  }
+}
+
+/**
+ * GET /api/upload/list
+ * 可选 query:
+ *  - q: string（按 filename 或 cid 模糊匹配，大小写不敏感）
+ *  - limit: number（默认 50，最大 200）
+ *  - offset: number（默认 0）
+ *
+ * 返回结构不变：{ items: [...] }
+ */
+export async function uploadList(req: Request, res: Response) {
+  try {
+    const adapter = getStorageProviderAdapter();
+    const out = await adapter.listUploads();
+
+    const rawItems = Array.isArray((out as any)?.items) ? (out as any).items : [];
+
+    const q = String(req.query.q || "").trim().toLowerCase();
+
+    let limit = Number(req.query.limit ?? 50);
+    let offset = Number(req.query.offset ?? 0);
+
+    if (!Number.isFinite(limit) || limit <= 0) limit = 50;
+    if (!Number.isFinite(offset) || offset < 0) offset = 0;
+    if (limit > 200) limit = 200;
+
+    let items = rawItems;
+
+    // ✅ 搜索：filename / cid 模糊匹配
+    if (q) {
+      items = items.filter((x: any) => {
+        const filename = String(x?.filename || "").toLowerCase();
+        const cid = String(x?.cid || "").toLowerCase();
+        return filename.includes(q) || cid.includes(q);
+      });
     }
 
-    const { mergedFilePath, fileName, fileSize } =
-      await assembleChunks(uploadId);
+    // ✅ 分页：offset/limit
+    items = items.slice(offset, offset + limit);
 
-    const ccResult = await createDealOnCC({
-      filePath: mergedFilePath,
-      fileName,
-      fileSize,
-      notes: "Uploaded via VaultX (stub CC)",
-    });
-
-    // 将支付信息一并记录
-    addFileRecord({
-      id: uploadId,
-      filename: fileName,
-      sizeBytes: fileSize,
-      cid: undefined,
-      status: ccResult.status,
-      note:
-        ccResult.message ||
-        "Stubbed CC deal. Replace with real CC API later.",
-      createdAt: new Date().toISOString(),
-
-      walletAddress,
-      priceFil,
-      priceUsdfc,
-      paymentTxHash,
-    });
-
-    return res.json({
-      uploadId,
-      fileName,
-      fileSize,
-      ccResult,
-    });
-  } catch (err: any) {
-    console.error("completeUploadHandler error:", err);
-    return res.status(500).json({ error: "Failed to complete upload" });
+    return res.json({ items });
+  } catch (e: any) {
+    return res.status(500).json({ error: e?.message || "list failed" });
   }
 }

@@ -1,22 +1,16 @@
-// src/routes/upload.routes.ts
 import { Router } from "express";
 import multer from "multer";
-import {
-  initUploadHandler,
-  uploadChunkHandler,
-  completeUploadHandler,
-} from "../controllers/upload.controller";
+import { uploadChunk, uploadComplete, uploadInit, uploadList, uploadStatus } from "../controllers/upload.controller";
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage() });
 
-// 初始化上传，获取 uploadId
-router.post("/init", initUploadHandler);
+router.post("/init", uploadInit);
+router.post("/chunk", upload.single("file"), uploadChunk);
+router.post("/complete", uploadComplete);
+router.get("/status", uploadStatus);
 
-// 上传单个分片（字段名 chunk）
-router.post("/chunk", upload.single("chunk"), uploadChunkHandler);
-
-// 完成上传（合并 + 调用 stub CC）
-router.post("/complete", completeUploadHandler);
+// ✅ 新增：落盘恢复的 completed uploads 列表
+router.get("/list", uploadList);
 
 export default router;
