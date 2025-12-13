@@ -9,3 +9,7 @@ uploads/
 mock_uploads/
 *.bin
 chunk*.bin
+
+# big artifacts (never commit)
+uploads_merged/
+*.zip
