@@ -1,16 +1,34 @@
 import { Router } from "express";
 import multer from "multer";
-import { uploadChunk, uploadComplete, uploadInit, uploadList, uploadStatus } from "../controllers/upload.controller";
+
+import {
+  initUpload,
+  uploadChunk,
+  completeUpload,
+  getUploadStatus,
+} from "../controllers/upload.controller";
 
 const router = Router();
-const upload = multer({ storage: multer.memoryStorage() });
+const upload = multer();
 
-router.post("/init", uploadInit);
+/**
+ * 初始化 upload
+ */
+router.post("/init", initUpload);
+
+/**
+ * 上传 chunk（当前阶段：整文件一个 chunk）
+ */
 router.post("/chunk", upload.single("file"), uploadChunk);
-router.post("/complete", uploadComplete);
-router.get("/status", uploadStatus);
 
-// ✅ 新增：落盘恢复的 completed uploads 列表
-router.get("/list", uploadList);
+/**
+ * 完成 upload → 写入 /mnt/md2/fwss/uploads
+ */
+router.post("/complete", completeUpload);
+
+/**
+ * 查询 upload 状态（可选）
+ */
+router.get("/status", getUploadStatus);
 
 export default router;

@@ -1,0 +1,47 @@
+import { Router } from "express";
+
+const router = Router();
+
+/**
+ * Admin metrics (mock for now)
+ * GET /api/admin/metrics
+ */
+router.get("/metrics", (_req, res) => {
+  res.json({
+    system: {
+      fwss: {
+        status: "ONLINE",
+        nodes: 1,
+        availableTB: 1.8,
+      },
+      curio: {
+        status: "ONLINE",
+        queue: 0,
+        lastTask: "ok",
+      },
+      lotus: {
+        status: "DEGRADED",
+        headLag: 12,
+        syncing: true,
+      },
+      database: {
+        status: "ONLINE",
+        type: "yugabyte",
+      },
+    },
+    storage: {
+      totalFiles: 128,
+      storedFiles: 120,
+      storedSizeGB: 9.1,
+      errors: 0,
+    },
+    trust: {
+      pdpEnabled: true,
+      lastProofUTC: "09:40",
+      coveredFiles: 118,
+    },
+    timestamp: Date.now(),
+  });
+});
+
+export default router;
