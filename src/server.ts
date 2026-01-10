@@ -1,28 +1,13 @@
 // src/server.ts
-import express from "express";
-import cors from "cors";
+// VaultX 后端 · 唯一启动入口（冻结）
 
-import adminRoutes from "./routes/admin.routes";
+import "dotenv/config";
+import app from "./index";
+
 console.log(">>> REAL server.ts LOADED <<<", __filename);
-// 🔥 强制 require admin.routes.ts（只用于排错）
-const adminRoutesDebug = require("./routes/admin.routes");
-console.log(">>> adminRoutesDebug =", adminRoutesDebug);
 
-import dealRoutes from "./routes/deal.routes";
-import uploadRoutes from "./routes/upload.routes";
-import storageRoutes from "./routes/storage.routes";   // ← 新增：文件列表 / 下载 / 删除
+const PORT = Number(process.env.PORT) || 3001;
 
-const app = express();
-app.use(cors());
-app.use(express.json());
-
-// 路由挂载
-app.use("/api/deal", dealRoutes);
-app.use("/api/upload", uploadRoutes);
-app.use("/api/storage", storageRoutes);               // ← 必须加上这一行！！！
-app.use("/api/admin", adminRoutes);
-
-const PORT = process.env.PORT || 3001;
-app.listen(PORT, () => {
-  console.log(`VaultX API listening on port ${PORT}`);
+app.listen(PORT, "0.0.0.0", () => {
+  console.log(`vaultx-api listening on http://0.0.0.0:${PORT}`);
 });

@@ -1,5 +1,5 @@
 // src/index.ts
-// 后端 · vaultx-api（唯一 App 定义处）
+// VaultX 后端 · 唯一 Express App 定义处（冻结）
 
 import express from "express";
 import cors from "cors";
@@ -26,13 +26,13 @@ app.get("/api/health", (req, res) => {
   });
 });
 
-// ✅ 统一在这里挂所有 API
+// ===== API 挂载（唯一位置） =====
 app.use("/api/admin", adminRoutes);
 app.use("/api/upload", uploadRoutes);
 app.use("/api/deal", dealRoutes);
 app.use("/api/storage", storageRoutes);
 
-// ✅ X仪表盘 API（只读）
+// X 仪表盘（只读）
 app.use("/api/dashboard", dashboardRoutes);
 
 export default app;
