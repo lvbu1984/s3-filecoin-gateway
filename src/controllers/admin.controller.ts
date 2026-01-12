@@ -1,11 +1,19 @@
 // src/controllers/admin.controller.ts
 import { Request, Response } from "express";
 import { listDeals } from "../store/deal.store";
+import { listFiles } from "../store/file.store";
 
 /**
  * Admin · Overview
+ * 系统总览（只读事实层）
  */
 export function getAdminOverview(req: Request, res: Response) {
+  const files = listFiles();
+
+  const totalFiles = files.length;
+  const totalSizeBytes = files.reduce((sum, f) => sum + f.size, 0);
+  const totalSizeGB = totalSizeBytes / (1024 * 1024 * 1024);
+
   res.json({
     status: "ok",
     system: {
@@ -14,8 +22,8 @@ export function getAdminOverview(req: Request, res: Response) {
       curio: "idle",
     },
     stats: {
-      totalFiles: 0,
-      totalSizeGB: 0,
+      totalFiles,
+      totalSizeGB,
       activeDeals: 0,
     },
     timestamp: Date.now(),
@@ -24,18 +32,31 @@ export function getAdminOverview(req: Request, res: Response) {
 
 /**
  * Admin · Files
- * ⚠️ 先返回最小可用结构，保证接口可用
- * 后续我们会接真实 storage 数据
+ * 文件事实统计（来源：file.store）
  */
 export function getAdminFiles(req: Request, res: Response) {
+  const files = listFiles();
+
+  const totalFiles = files.length;
+  const totalSizeBytes = files.reduce((sum, f) => sum + f.size, 0);
+  const totalSizeGB = totalSizeBytes / (1024 * 1024 * 1024);
+
+  const byStatus: Record<string, number> = {
+    stored: 0,
+    uploading: 0,
+    failed: 0,
+  };
+
+  for (const f of files) {
+    if (byStatus[f.status] !== undefined) {
+      byStatus[f.status]++;
+    }
+  }
+
   res.json({
-    totalFiles: 0,
-    totalSizeGB: 0,
-    byStatus: {
-      stored: 0,
-      uploading: 0,
-      failed: 0,
-    },
+    totalFiles,
+    totalSizeGB,
+    byStatus,
   });
 }
 

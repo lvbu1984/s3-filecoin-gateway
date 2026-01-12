@@ -9,6 +9,7 @@ import uploadRoutes from "./routes/upload.routes";
 import dealRoutes from "./routes/deal.routes";
 import storageRoutes from "./routes/storage.routes";
 import dashboardRoutes from "./routes/dashboard.routes";
+import internalRoutes from "./routes/internal.routes";
 
 console.log(">>> REAL index.ts LOADED <<<", __filename);
 
@@ -28,6 +29,7 @@ app.get("/api/health", (req, res) => {
 
 // ===== API 挂载（唯一位置） =====
 app.use("/api/admin", adminRoutes);
+app.use("/api/internal", internalRoutes);
 app.use("/api/upload", uploadRoutes);
 app.use("/api/deal", dealRoutes);
 app.use("/api/storage", storageRoutes);
