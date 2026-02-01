@@ -172,3 +172,15 @@ All cleanup actions should be performed in separate commits.
 This document serves as the **canonical map** of the codebase
 for maintainers, reviewers, and contributors.
 
+## Note on VaultX Legacy Naming
+
+Some identifiers, variable names, and internal abstractions in the codebase
+still reference "VaultX".
+
+These references originate from earlier internal development and do NOT
+indicate a dependency on any VaultX product or service.
+
+They are considered **legacy naming artifacts** and will be incrementally
+renamed or removed in later refactoring phases, once gateway semantics and
+behavior are fully stabilized.
+
