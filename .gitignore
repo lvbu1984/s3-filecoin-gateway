@@ -1,8 +1,6 @@
 node_modules/
-dist/
-uploads/
 .env
-*.log
+.DS_Store
 
 
 # VaultX runtime artifacts (do not commit)
@@ -13,3 +11,6 @@ chunk*.bin
 # big artifacts (never commit)
 uploads_merged/
 *.zip
+
+# NOTE: ignore rules will be refined after first end-to-end storage flow works
+
