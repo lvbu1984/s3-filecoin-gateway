@@ -1,4 +1,11 @@
-# S3-Compatible Object Gateway (Early Progress)
+# S3–Filecoin Gateway (Reference Implementation)
+
+This repository contains an early-stage, **reference-quality S3-compatible Gateway**
+that translates standard S3 object semantics into Filecoin-based storage actions.
+
+This project does **not** implement S3 itself, nor does it aim to be a production-grade
+storage service. Its purpose is to serve as a clear, auditable integration layer
+between existing S3 tooling and the Filecoin storage stack.
 
 This branch represents the **early-stage implementation of a reusable S3-compatible object gateway**, designed to map standard S3 object storage semantics to Filecoin-based storage primitives.
 
