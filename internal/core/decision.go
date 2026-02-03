@@ -1,3 +1,4 @@
+package core
 // decision.go
 //
 // Phase 1 frozen responsibility:

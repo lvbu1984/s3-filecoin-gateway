@@ -1,3 +1,4 @@
+package model
 // result.go
 //
 // Phase 1 frozen responsibility:

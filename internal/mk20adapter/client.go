@@ -1,3 +1,4 @@
+package mk20adapter
 // client.go
 //
 // Phase 1 frozen responsibility:

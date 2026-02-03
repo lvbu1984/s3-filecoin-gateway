@@ -1,3 +1,4 @@
+package model
 // staged.go
 //
 // Phase 1 frozen responsibility:

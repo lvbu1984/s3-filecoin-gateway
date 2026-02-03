@@ -1,3 +1,4 @@
+package core
 // translator.go
 //
 // Phase 1 frozen responsibility:

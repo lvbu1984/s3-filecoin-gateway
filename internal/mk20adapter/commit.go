@@ -1,3 +1,4 @@
+package mk20adapter
 // commit.go
 //
 // Phase 1 frozen responsibility:

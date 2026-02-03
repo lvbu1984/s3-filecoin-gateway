@@ -1,11 +1,30 @@
-// main.go
-//
-// Phase 1 frozen responsibility:
-// - Wire S3 Ingress, Core Translator, and MK20 Adapter
-// - Control execution order only
-//
-// Forbidden in this file:
-// - Any business logic
-// - Any S3 / MK20 specific handling
-// - Any conditional decision making
+package main
+
+import (
+	"log"
+	"net/http"
+	"os"
+
+	"s3-filecoin-gateway/internal/s3ingress"
+)
+
+func main() {
+	addr := os.Getenv("SFG_LISTEN")
+	if addr == "" {
+		addr = ":8080"
+	}
+
+	mux := http.NewServeMux()
+	mux.Handle("/", s3ingress.NewHandler())
+
+	server := &http.Server{
+		Addr:    addr,
+		Handler: mux,
+	}
+
+	log.Printf("SFG listening on %s\n", addr)
+	if err := server.ListenAndServe(); err != nil {
+		log.Fatal(err)
+	}
+}
 
